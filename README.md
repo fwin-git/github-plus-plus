@@ -16,7 +16,7 @@ Tests include fixtures, snapshots, mocks, and test runner configuration. The ext
 ## Documentation
 
 The **Docs** tab shows Markdown files with a file tree, search, and a table of contents.
-Press **Cmd+K** or **Ctrl+K** from any repository page to open Docs search.
+Press **Cmd+K** or **Ctrl+K** from any repository page to open the floating documentation search palette. Choose a result to open it in Docs; press Escape to return to your page.
 You can change the tab position in **Options**.
 
 [Confluence Cloud](docs/confluence.md) pages appear in their own site and space groups. Connect a site using your browser login, read pages in Docs, and attach them to repository groups. Attachments are personal settings saved in your browser.
@@ -24,6 +24,15 @@ You can change the tab position in **Options**.
 ![Documentation viewer with a file tree and table of contents](media/docs.png)
 
 *Screenshots use example data and the actual extension. You can reproduce them without an account.*
+
+## Download a build
+
+Download the Chrome or Firefox ZIP from the [latest release](https://github.com/fwin-git/github-plus-plus/releases/latest) and unzip it.
+
+- **Chrome, Edge, Brave:** open `chrome://extensions`, enable Developer mode, select **Load unpacked**, and choose the unzipped folder.
+- **Firefox, Zen:** open `about:debugging#/runtime/this-firefox`, select **Load Temporary Add-on…**, and choose `manifest.json` from the unzipped folder. This unsigned development build lasts until the browser closes.
+
+For an update, load the new build and refresh your GitHub tabs.
 
 ## Install from source
 

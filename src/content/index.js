@@ -8,6 +8,7 @@ import { makeClient } from './github-api.js';
 import { collectDocs } from '../common/docs-model.js';
 import { ensureTab, setTabActive, findRepoNav, tabConnected, removeTab } from './tab.js';
 import { createViewer } from './viewer.js';
+import { createCommandPalette } from './command-palette.js';
 import { startPrStats } from './pr-stats.js';
 import { startPrCounts } from './pr-counts.js';
 import { confluenceStorage } from '../common/confluence-storage.js';
@@ -62,6 +63,7 @@ function parseRepo(pathname) {
 let current = null; // { key, owner, repo, loading, settings, client, docs, truncated, total, viewer }
 let scanTimer = 0;
 let requestedSearch = null;
+const palette = createCommandPalette({ onClose: () => { requestedSearch = null; } });
 
 const hasDocs = state => state?.docs && (state.docs.length || state.confluenceSites?.length || parseHash(location.hash)?.source === 'confluence');
 
@@ -72,21 +74,15 @@ function updateDocsTab() {
 }
 
 function openRequestedSearch() {
+  palette.closeIfNavigated();
   const info = parseRepo(location.pathname);
   if (!requestedSearch || requestedSearch !== current?.key || `${info?.owner}/${info?.repo}` !== requestedSearch || !current.docs) return;
+  requestedSearch = null;
   if (!hasDocs(current)) {
-    requestedSearch = null;
-    showToast('No documentation found in this repository.');
+    palette.setMessage('No documentation found in this repository.');
     return;
   }
-  if (!parseHash(location.hash)) location.hash = 'docs';
-  applyRoute();
-  const viewer = getViewer();
-  if (viewer?.isOpen()) {
-    requestedSearch = null;
-    document.querySelector('.gdt-toast')?.remove();
-    viewer.focusSearch();
-  }
+  palette.setSource(getViewer().getSearchSource(), current.settings.theme);
 }
 
 // scan() is called repeatedly (boot, Turbo loads, mutation storms during
@@ -94,6 +90,7 @@ function openRequestedSearch() {
 // for the same repo are collapsed via current.loading, and a repo switch
 // invalidates in-flight loads by object identity (current !== me).
 async function scan({ forSearch = false } = {}) {
+  palette.closeIfNavigated();
   const repoInfo = parseRepo(location.pathname);
   const nav = findRepoNav();
   const key = repoInfo ? `${repoInfo.owner}/${repoInfo.repo}` : null;
@@ -105,7 +102,7 @@ async function scan({ forSearch = false } = {}) {
       // 'teardown' / 'teardown-wait': we actually left the repo (or switched
       // to another one). Transient nav absence on the SAME repo keeps all
       // in-memory state (docs, viewer, search index) for instant re-inject.
-      current.viewer?.close();
+      current.viewer?.dispose();
       current = null;
     }
     return;
@@ -120,7 +117,7 @@ async function scan({ forSearch = false } = {}) {
     if (current.loading) return;
     // previous attempt died without finishing — fall through and retry
   } else {
-    current?.viewer?.close();
+    current?.viewer?.dispose();
     current = { key, ...repoInfo };
   }
 
@@ -167,7 +164,8 @@ async function scan({ forSearch = false } = {}) {
     document.documentElement.setAttribute('data-gdt-error', `${err && err.name}: ${err && err.message}`.slice(0, 300));
     if (current === me && requestedSearch === me.key) {
       requestedSearch = null;
-      showToast('Could not load documentation. Check repository access in the extension Options.');
+      palette.closeIfNavigated();
+      palette.setMessage('Could not load documentation. Check repository access in the extension Options.');
     }
   } finally {
     me.loading = false;
@@ -202,7 +200,8 @@ async function refreshRepo() {
       includeRootFiles: settings.includeRootFiles,
       maxFiles: settings.maxFiles,
     });
-    current.viewer?.close();
+    palette.close();
+    current.viewer?.dispose();
     current.viewer = null;
     current.docs = docs;
     current.truncated = truncated || treeRes.truncated;
@@ -230,12 +229,14 @@ function applyRoute() {
 }
 
 function scheduleScan() {
+  palette.closeIfNavigated();
   clearTimeout(scanTimer);
   scanTimer = setTimeout(scan, 200);
 }
 
-window.addEventListener('hashchange', applyRoute);
-window.addEventListener('popstate', applyRoute);
+const routeChanged = () => { palette.closeIfNavigated(); applyRoute(); };
+window.addEventListener('hashchange', routeChanged);
+window.addEventListener('popstate', routeChanged);
 window.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'k') return;
   const info = parseRepo(location.pathname);
@@ -245,10 +246,12 @@ window.addEventListener('keydown', event => {
   if (!findRepoNav() && current?.key !== key && repoMeta !== key) return;
   event.preventDefault();
   event.stopImmediatePropagation();
+  if (event.repeat) return;
+  if (palette.isOpen()) { palette.close(); return; }
   requestedSearch = key;
+  palette.open({ repository: key, theme: current?.settings?.theme });
   if (current?.key === key && current.docs) openRequestedSearch();
   else {
-    showToast('Loading documentation…');
     void scan({ forSearch: true });
   }
 }, true);
@@ -282,9 +285,10 @@ onSettingsChanged((next) => {
       return;
     }
   }
+  palette.close();
   const old = current;
   current = null;
-  old?.viewer?.close();
+  old?.viewer?.dispose();
   removeTab();
   scheduleScan();
 });
@@ -292,7 +296,8 @@ onSettingsChanged((next) => {
 ext.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes[CONFLUENCE_SITES_KEY]) {
-    current?.viewer?.close(); current = null; removeTab(); scheduleScan();
+    palette.close();
+    current?.viewer?.dispose(); current = null; removeTab(); scheduleScan();
   } else if (Object.keys(changes).some(key => key.startsWith(ATTACHMENT_PREFIX))) {
     current?.viewer?.refreshConfluenceAttachments()?.catch(() => {});
   }

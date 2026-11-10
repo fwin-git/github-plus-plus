@@ -5,16 +5,30 @@ import { parseQuery, searchFiles } from '../common/search.js';
 import { githubSlug } from '../common/slugger.js';
 import { basename } from '../common/paths.js';
 
-export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIndexState, getOrgResults, getConfluenceResults, onNavigate }) {
+export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIndexState, getOrgResults, getConfluenceResults, onNavigate, subscribe, showSuggestions = false, onDismiss, onResults = () => {} }) {
   let items = [];
   let active = -1;
   let timer = 0;
+  let lastQuery = null;
+  const events = new document.defaultView.AbortController();
+  const listen = (target, type, fn) => target.addEventListener(type, fn, { signal: events.signal });
+  const resultId = panel.id || (panel.id = 'gdt-search-results');
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-controls', resultId);
+  input.setAttribute('aria-expanded', 'false');
+  panel.setAttribute('role', 'listbox');
+  panel.setAttribute('aria-label', 'Documentation results');
 
   function close() {
+    clearTimeout(timer);
+    timer = 0;
     panel.hidden = true;
     panel.textContent = '';
     items = [];
     active = -1;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
   }
 
   function pick(item) {
@@ -24,10 +38,15 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
   }
 
   function setActive(i) {
-    if (active >= 0 && items[active]) items[active].el.classList.remove('gdt-active');
+    if (active >= 0 && items[active]) {
+      items[active].el.classList.remove('gdt-active');
+      items[active].el.setAttribute('aria-selected', 'false');
+    }
     active = i;
     if (active >= 0 && items[active]) {
       items[active].el.classList.add('gdt-active');
+      items[active].el.setAttribute('aria-selected', 'true');
+      input.setAttribute('aria-activedescendant', items[active].el.id);
       items[active].el.scrollIntoView({ block: 'nearest' });
     }
   }
@@ -37,14 +56,15 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
     setActive((active + delta + items.length) % items.length);
   }
 
-  input.addEventListener('input', () => {
+  listen(input, 'input', () => {
     clearTimeout(timer);
     timer = setTimeout(run, 120);
   });
-  input.addEventListener('keydown', (e) => {
+  listen(input, 'keydown', (e) => {
     if (e.key === 'Escape') {
-      close();
-      input.blur();
+      e.preventDefault();
+      if (onDismiss) onDismiss();
+      else { close(); input.blur(); }
       e.stopPropagation();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -53,6 +73,7 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
       e.preventDefault();
       move(-1);
     } else if (e.key === 'Enter') {
+      if (timer) run();
       const item = items[active >= 0 ? active : 0];
       if (item) {
         e.preventDefault();
@@ -60,10 +81,11 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
       }
     }
   });
-  input.addEventListener('focus', () => {
-    if (input.value.trim()) run();
+  listen(input, 'focus', () => {
+    if (input.value.trim() || showSuggestions) run();
   });
-  document.addEventListener('click', (e) => {
+  listen(document, 'click', (e) => {
+    if (showSuggestions) return;
     if (panel.hidden || panel.contains(e.target) || e.target === input) return;
     // Chips and broken wiki links open the panel from within the same click.
     if (e.target.closest && e.target.closest('.gdt-tag-chip, .gdt-wikilink-broken')) return;
@@ -98,6 +120,10 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
   function addItem({ path, heading, href, title, subtitle, snippet }) {
     const row = el('button', 'gdt-sr-item');
     row.type = 'button';
+    row.id = `${resultId}-${items.length}`;
+    row.tabIndex = -1;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', 'false');
     row.appendChild(el('span', 'gdt-sr-title', title));
     if (subtitle) row.appendChild(el('span', 'gdt-sr-path', subtitle));
     if (snippet) {
@@ -114,18 +140,21 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
 
   function run() {
     const q = input.value.trim();
+    const selected = q === lastQuery ? items[active] : null;
+    lastQuery = q;
     close();
-    if (!q) return;
+    if (!q && !showSuggestions) return;
     panel.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
 
     const parsed = parseQuery(q);
     const meta = getMeta();
     const fileResults = searchFiles(getDocs(), meta, parsed).slice(0, 8);
     const index = getIndex();
-    const contentResults = index && index.size ? index.search(parsed, { limit: 12 }) : [];
+    const contentResults = q && index && index.size ? index.search(parsed, { limit: 12 }) : [];
 
     if (fileResults.length) {
-      addGroup('Files');
+      addGroup(q ? 'Files' : 'Documents');
       for (const { doc } of fileResults) {
         const m = meta.get(doc.path);
         addItem({ path: doc.path, title: (m && m.title) || doc.title, subtitle: doc.path });
@@ -150,7 +179,7 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
       addGroup('Confluence');
       for (const result of confluenceResults) addItem(result);
     }
-    const orgResults = getOrgResults ? getOrgResults(parsed) : [];
+    const orgResults = q && getOrgResults ? getOrgResults(parsed) : [];
     if (orgResults.length) {
       addGroup('Organization');
       for (const r of orgResults) addItem(r);
@@ -165,8 +194,12 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
     } else if (!items.length) {
       panel.appendChild(el('div', 'gdt-sr-note', 'No results'));
     }
-    setActive(items.length ? 0 : -1);
+    const previous = selected ? items.findIndex(item => item.path === selected.path && item.href === selected.href && item.heading === selected.heading) : -1;
+    setActive(previous >= 0 ? previous : items.length ? 0 : -1);
+    onResults(items.length);
   }
+
+  const unsubscribe = subscribe?.(() => { if (showSuggestions || !panel.hidden) run(); });
 
   return {
     focus() {
@@ -174,6 +207,13 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
       input.select();
     },
     close,
+    refresh: run,
+    destroy({ preserveResults = false } = {}) {
+      if (preserveResults) { clearTimeout(timer); timer = 0; }
+      else close();
+      events.abort();
+      unsubscribe?.();
+    },
     isOpen: () => !panel.hidden,
     setQuery(q) {
       input.value = q;

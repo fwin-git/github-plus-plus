@@ -87,6 +87,10 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   let refs = null;
   let searchUI = null;
   let mounted = false;
+  let disposed = false;
+  let searchPrepared = false;
+  const searchListeners = new Set();
+  const notifySearch = () => { if (!disposed) for (const fn of searchListeners) fn(); };
   let currentPath = null;
   let confluenceRoute = null;
   let loadSeq = 0;
@@ -105,7 +109,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   const confluence = confluenceSites.length ? createConfluenceViewer({
     sites: confluenceSites,
     repository: `${client.owner}/${client.repo}`.toLowerCase(),
-    onChange: () => { if (mounted) renderTree(); },
+    onChange: () => { if (mounted) renderTree(); notifySearch(); },
   }) : null;
   loadDrafts(client.owner, client.repo).then((d) => {
     drafts = d;
@@ -253,6 +257,48 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     return m;
   }
 
+  // Both search surfaces use the same sources, ordering, and navigation.
+  function searchOptions() {
+    return {
+      getDocs: () => docs,
+      getMeta: () => displayMeta(),
+      getIndex: () => index,
+      getIndexState: () => indexState,
+      getConfluenceResults: parsed => confluence?.search(parsed) || [],
+      getOrgResults: (parsed) => {
+        if (!orgSession || !orgSession.index.size) return [];
+        return orgSession.index.search(parsed, { limit: 12 }).map((r) => {
+          const sep = r.path.indexOf(ORG_SEP);
+          const repo = r.path.slice(0, sep);
+          const path = r.path.slice(sep + 1);
+          const doc = (orgSession.repoDocs.get(repo) || []).find((d) => d.path === path);
+          return {
+            href: `/${client.owner}/${repo}${buildHash({ path, heading: r.matchedHeading ? githubSlug(r.matchedHeading) : null })}`,
+            title: (doc && doc.title) || basename(path),
+            subtitle: `${repo} › ${path}`,
+            snippet: r.snippet && r.snippet.text ? r.snippet : null,
+          };
+        });
+      },
+      onNavigate: ({ path, heading, href }) => {
+        if (href) {
+          location.href = href;
+          return;
+        }
+        location.hash = buildHash({ path, heading });
+      },
+      subscribe(listener) { searchListeners.add(listener); return () => searchListeners.delete(listener); },
+    };
+  }
+
+  function prepareSearch() {
+    if (searchPrepared || disposed) return;
+    searchPrepared = true;
+    void startIndexing();
+    void maybeRestoreOrg();
+    confluence?.start().catch(() => {});
+  }
+
   // ---- DOM scaffold ---------------------------------------------------------
 
   function h(html) {
@@ -355,33 +401,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     searchUI = createSearchUI({
       input: refs.searchInput,
       panel: refs.results,
-      getDocs: () => docs,
-      getMeta: () => displayMeta(),
-      getIndex: () => index,
-      getIndexState: () => indexState,
-      getConfluenceResults: parsed => confluence?.search(parsed) || [],
-      getOrgResults: (parsed) => {
-        if (!orgSession || !orgSession.index.size) return [];
-        return orgSession.index.search(parsed, { limit: 12 }).map((r) => {
-          const sep = r.path.indexOf(ORG_SEP);
-          const repo = r.path.slice(0, sep);
-          const path = r.path.slice(sep + 1);
-          const doc = (orgSession.repoDocs.get(repo) || []).find((d) => d.path === path);
-          return {
-            href: `/${client.owner}/${repo}${buildHash({ path, heading: r.matchedHeading ? githubSlug(r.matchedHeading) : null })}`,
-            title: (doc && doc.title) || basename(path),
-            subtitle: `${repo} › ${path}`,
-            snippet: r.snippet && r.snippet.text ? r.snippet : null,
-          };
-        });
-      },
-      onNavigate: ({ path, heading, href }) => {
-        if (href) {
-          location.href = href;
-          return;
-        }
-        location.hash = buildHash({ path, heading });
-      },
+      ...searchOptions(),
     });
 
     root.querySelector('[data-gdt-refresh]').addEventListener('click', () => {
@@ -564,6 +584,9 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     document.addEventListener('keydown', keydownHandler, true);
     updateSidebarMeta();
     renderTree();
+    renderTags();
+    refs.progress.hidden = !indexState.started || indexState.finished;
+    if (indexState.started && !indexState.finished) refs.progress.textContent = `Indexing content… ${Math.round((indexState.done / Math.max(1, indexState.total)) * 100)}%`;
     refs.openGh.href = `https://github.com/${client.owner}/${client.repo}`;
     return true;
   }
@@ -573,7 +596,6 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     if (editor) closeEditor(true);
     mounted = false;
     loadSeq++;
-    confluence?.stop();
     confluenceRoute = null;
     document.removeEventListener('keydown', keydownHandler, true);
     if (tocObserver) {
@@ -614,6 +636,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   // ---- sidebar --------------------------------------------------------------
 
   function updateSidebarMeta() {
+    if (!mounted) return;
     // Icons stand in for the words "documents" (file) and "repos" (branch) so
     // the counts fit one row. Numbers are ours (no user data) so innerHTML is
     // safe here; the org name uses textContent separately.
@@ -652,6 +675,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   }
 
   function renderTree() {
+    if (!mounted) return;
     updateSidebarMeta();
     if (orgSession) {
       renderOrgTree();
@@ -959,13 +983,14 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     indexState.started = true;
     const queue = [...docs];
     const limitBytes = (settings.contentSearchLimitKB || 200) * 1024;
-    refs.progress.hidden = false;
+    if (refs) refs.progress.hidden = false;
     const tick = () => {
-      refs.progress.textContent = `Indexing content… ${Math.round((indexState.done / Math.max(1, indexState.total)) * 100)}%`;
+      notifySearch();
+      if (refs) refs.progress.textContent = `Indexing content… ${Math.round((indexState.done / Math.max(1, indexState.total)) * 100)}%`;
     };
     tick();
     const worker = async () => {
-      while (queue.length) {
+      while (queue.length && !disposed) {
         const doc = queue.shift();
         try {
           if (doc.size && doc.size > limitBytes) continue;
@@ -985,7 +1010,8 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     };
     await Promise.all(Array.from({ length: 6 }, worker));
     indexState.finished = true;
-    refs.progress.hidden = true;
+    if (refs) refs.progress.hidden = true;
+    notifySearch();
     if (orgSession) foldCurrentRepoIntoOrg();
     sortTree(tree, displayMeta());
     flat = flattenTree(tree);
@@ -2072,7 +2098,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     if (orgRestoreTried || orgSession) return;
     orgRestoreTried = true;
     const snap = await loadOrgSnapshot(client.owner);
-    if (!snap || !snap.size || !mounted || orgSession) return;
+    if (!snap || !snap.size || disposed || orgSession) return;
     if (!snap.has(client.repo)) snap.set(client.repo, docs);
     let totalDocs = 0;
     for (const d of snap.values()) totalDocs += d.length;
@@ -2099,7 +2125,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     const readyFromCache = [...snap.keys()].filter(
       (repo) => repo !== client.repo && repoContentCached(snap.get(repo) || [], cachedShas, limitBytes)
     );
-    if (readyFromCache.length && orgSession) runOrgIndex(readyFromCache);
+    if (readyFromCache.length && orgSession && !disposed) runOrgIndex(readyFromCache);
   }
 
   // Fold the current repo's already-indexed content into the org index at no
@@ -2125,7 +2151,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   // Fetch + index a set of repos, updating their rings live. Used by the
   // re-index button (all repos) and the per-repo expand confirmation.
   async function runOrgIndex(repoNames) {
-    if (!orgSession || !repoNames.length) return;
+    if (disposed || !orgSession || !repoNames.length) return;
     const subset = new Map();
     for (const repo of repoNames) subset.set(repo, orgSession.repoDocs.get(repo) || []);
     orgSession.indexing = true;
@@ -2144,6 +2170,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       }).then((idx) => {
         if (!orgSession) return;
         orgSession.index.merge(idx);
+        notifySearch();
       });
     } catch {
       // per-repo errors already surface via ring state
@@ -2171,13 +2198,13 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       if (!mounted) {
         if (!mount()) return;
         applyTheme();
-        startIndexing();
-        maybeRestoreOrg();
-        confluence?.start().catch(() => {});
+        prepareSearch();
       }
       await renderRoute(route);
     },
     close,
+    dispose() { disposed = true; close(); confluence?.stop(); searchListeners.clear(); searchUI?.destroy(); },
+    getSearchSource() { prepareSearch(); return searchOptions(); },
     focusSearch: () => searchUI?.focus(),
     refreshConfluenceAttachments: () => confluence?.reloadAttachments(),
     isOpen: () => mounted,

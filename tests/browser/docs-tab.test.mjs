@@ -92,15 +92,20 @@ test('Docs tab follows configured position and aligns icon, label, and badge wit
 });
 
 for (const path of ['/acme/widget/issues/7', '/acme/widget/pull/42/changes', '/acme/widget/settings']) {
-  test(`Cmd+K opens and focuses Docs search from ${path}`, async t => {
+  test(`Cmd+K opens a floating fuzzy search without changing ${path}`, async t => {
     const page = await fixture(t, { path });
     await page.waitForSelector('[data-gdt-tab]');
     await page.keyboard.down('Meta'); await page.keyboard.press('k'); await page.keyboard.up('Meta');
-    await page.waitForFunction(() => document.activeElement?.matches('[data-gdt-search]'), { timeout: 2000 });
+    await page.waitForFunction(() => document.activeElement?.matches('[data-gdt-palette-input]'), { timeout: 2000 });
     assert.equal(new URL(page.url()).pathname, path);
-    assert.equal(new URL(page.url()).hash, '#docs');
-    await page.keyboard.type('guide');
-    await page.waitForSelector('.gdt-sr-item');
+    assert.equal(new URL(page.url()).hash, '');
+    assert.equal(await page.$('#gdt-root'), null);
+    assert.equal(await page.$eval('main', el => getComputedStyle(el).display), 'block');
+    await page.keyboard.type('gde');
+    await page.waitForSelector('#gdt-command-palette .gdt-sr-item');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('[data-gdt-article]');
+    assert.equal(new URL(page.url()).hash, '#docs/docs/guide.md');
   });
 }
 
@@ -121,10 +126,14 @@ test('Ctrl+K pressed while the tree loads focuses search when the docs arrive', 
   const gate = new Promise(resolve => { release = resolve; }); t.after(release);
   const page = await fixture(t, { gate });
   await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control');
-  await page.waitForSelector('.gdt-toast');
+  await page.waitForSelector('#gdt-command-palette[open]');
+  await page.keyboard.type('guide');
+  assert.equal(new URL(page.url()).hash, '');
   release();
-  await page.waitForFunction(() => document.activeElement?.matches('[data-gdt-search]'), { timeout: 2000 });
-  assert.equal(await page.$('.gdt-toast'), null);
+  await page.waitForFunction(() => document.activeElement?.matches('[data-gdt-palette-input]'), { timeout: 2000 });
+  await page.waitForSelector('#gdt-command-palette .gdt-sr-item');
+  assert.equal(new URL(page.url()).hash, '');
+  assert.equal(await page.$eval('[data-gdt-palette-input]',el=>el.value),'guide');
 });
 
 test('Options saves the Docs position and restores Last by default', async t => {
@@ -143,4 +152,98 @@ test('Options saves the Docs position and restores Last by default', async t => 
   await page.click('#reset');
   await page.waitForFunction(() => window.savedPosition() === 'last');
   assert.equal(await page.$eval('#docs-tab-position', el => el.value), 'last');
+});
+
+for (const dismissal of ['Escape', 'shortcut', 'backdrop']) test(`palette ${dismissal} dismissal restores focus without changing the page`, async t => {
+  const page=await fixture(t);
+  await page.waitForSelector('[data-gdt-tab]');
+  await page.click('textarea'); await page.keyboard.type('Unsent comment');
+  await page.keyboard.down('Meta'); await page.keyboard.press('k'); await page.keyboard.up('Meta');
+  await page.waitForSelector('#gdt-command-palette[open]');
+  if(dismissal==='Escape')await page.keyboard.press('Escape');
+  else if(dismissal==='shortcut'){await page.keyboard.down('Meta'); await page.keyboard.press('k'); await page.keyboard.up('Meta');}
+  else await page.mouse.click(4,4);
+  await page.waitForFunction(()=>!document.querySelector('#gdt-command-palette[open]'));
+  assert.equal(await page.evaluate(()=>document.activeElement?.tagName),'TEXTAREA');
+  assert.equal(await page.$eval('textarea',el=>el.value),'Unsent comment');
+  assert.equal(new URL(page.url()).hash,'');
+  assert.equal(await page.$('#gdt-root'),null);
+});
+
+test('dismissing a loading palette prevents the completed request reopening it', async t => {
+  let release;const gate=new Promise(resolve=>release=resolve);t.after(release);
+  const page=await fixture(t,{gate});
+  await page.keyboard.down('Meta'); await page.keyboard.press('k'); await page.keyboard.up('Meta');
+  await page.waitForSelector('#gdt-command-palette[open]');
+  await page.keyboard.press('Escape');release();
+  await page.waitForSelector('[data-gdt-tab]');
+  await page.waitForFunction(()=>!document.querySelector('#gdt-command-palette'));
+  assert.equal(await page.$('#gdt-command-palette[open]'),null);
+  assert.equal(await page.$('#gdt-root'),null);
+  assert.equal(new URL(page.url()).hash,'');
+});
+
+test('palette refresh selects the best match for a new query and Enter flushes pending input', async t => {
+  const page=await fixture(t);
+  await page.waitForSelector('[data-gdt-tab]');
+  await page.keyboard.down('Meta'); await page.keyboard.press('k'); await page.keyboard.up('Meta');
+  await page.waitForFunction(()=>document.querySelector('#gdt-palette-results')?.textContent.includes('Indexing')===false);
+  await page.keyboard.type('guide');
+  await page.waitForFunction(()=>document.querySelectorAll('#gdt-palette-results .gdt-sr-item').length===2);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.$eval('[data-gdt-palette-input]', el=>el.getAttribute('aria-activedescendant')),'gdt-palette-results-1');
+  await page.keyboard.down('Meta');await page.keyboard.press('a');await page.keyboard.up('Meta');
+  await page.keyboard.type('gde');
+  await page.waitForFunction(()=>document.querySelectorAll('#gdt-palette-results .gdt-sr-item').length===1);
+  assert.equal(await page.$eval('[data-gdt-palette-input]', el=>el.getAttribute('aria-activedescendant')),'gdt-palette-results-0');
+  // Enter must never open a stale result while the 120ms debounce is pending.
+  await page.$eval('[data-gdt-palette-input]',el=>{el.value='no-such-document';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+  assert.equal(new URL(page.url()).hash,'');
+  assert.match(await page.$eval('#gdt-palette-results',el=>el.textContent),/No results/);
+});
+
+for(const viewport of [{width:1440,height:900},{width:390,height:700}])test(`palette fits and traps focus at ${viewport.width}px`,async t=>{
+  const page=await fixture(t);await page.setViewport(viewport);await page.waitForSelector('[data-gdt-tab]');
+  await page.keyboard.down('Control');await page.keyboard.press('k');await page.keyboard.up('Control');
+  await page.waitForFunction(()=>document.querySelector('#gdt-command-palette').getAnimations().every(animation=>animation.playState==='finished'));
+  const rect=await page.$eval('#gdt-command-palette',el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});
+  assert.ok(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=viewport.width&&rect.y+rect.height<=viewport.height);
+  assert.ok(Math.abs(rect.x+rect.width/2-viewport.width/2)<1);
+  assert.ok(Math.abs(rect.y+rect.height/2-viewport.height/2)<1);
+  await page.keyboard.press('Tab');await page.keyboard.press('Tab');await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(()=>document.querySelector('#gdt-command-palette').contains(document.activeElement)),true);
+});
+
+test('palette searches loaded Confluence pages and opens their source route',async t=>{
+  const page=await fixture(t,{confluence:true,path:'/acme/widget#docs?source=confluence&site=https%3A%2F%2Fexample.atlassian.net&page=101'});
+  await page.waitForSelector('.gdt-confluence-controls');
+  await page.keyboard.down('Control');await page.keyboard.press('k');await page.keyboard.up('Control');
+  await page.keyboard.type('Cloud');
+  await page.waitForFunction(()=>document.querySelector('#gdt-palette-results')?.textContent.includes('Cloud guide'));
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.gdt-confluence-controls');
+  assert.ok(new URL(page.url()).hash.includes('source=confluence'));
+  assert.equal(await page.$('#gdt-command-palette'),null);
+});
+
+for(const reduced of [false,true])test(`palette motion respects reduced motion (${reduced}) and rapid reopening`,async t=>{
+  const page=await fixture(t);await page.emulateMediaFeatures([{name:'prefers-reduced-motion',value:reduced?'reduce':'no-preference'}]);
+  await page.waitForSelector('[data-gdt-tab]');
+  const toggle=async()=>{await page.keyboard.down('Meta');await page.keyboard.press('k');await page.keyboard.up('Meta');};
+  await toggle();
+  assert.equal(await page.$eval('#gdt-command-palette',el=>getComputedStyle(el).animationName),reduced?'none':'gdt-palette-in');
+  await page.waitForSelector('#gdt-palette-results .gdt-sr-item');
+  await page.keyboard.press('Escape');
+  if(!reduced){
+    assert.equal(await page.$eval('#gdt-command-palette',el=>el.classList.contains('gdt-palette-closing')),true);
+    assert.ok(await page.$('#gdt-palette-results .gdt-sr-item'));
+  }
+  await toggle();
+  await page.waitForFunction(()=>document.activeElement?.matches('[data-gdt-palette-input]'));
+  assert.equal(await page.$$eval('#gdt-command-palette',els=>els.length),1);
+  await page.keyboard.type('guide');
+  await page.waitForFunction(()=>document.querySelector('#gdt-palette-results')?.textContent.includes('Guide'));
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-gdt-article]');
+  assert.equal(await page.$('#gdt-command-palette'),null);
 });

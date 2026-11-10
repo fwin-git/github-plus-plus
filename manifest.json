@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Github++",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Adds GitHub docs and Confluence Cloud reading, plus separate code, test, and draft counts for pull requests.",
   "homepage_url": "https://github.com/fwin-git/github-plus-plus",
   "icons": {

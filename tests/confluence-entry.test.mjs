@@ -13,6 +13,8 @@ function open(repo,{sessionError=false,hash='#docs',position='last'}={}) {
   const w=dom.window;
   w.fetch=async()=>{throw new Error('Unexpected external request');};w.Response=Response;w.Request=Request;
   w.scrollTo=()=>{};w.HTMLElement.prototype.scrollIntoView=()=>{};
+  w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
+  w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
   w.IntersectionObserver=class{observe(){}disconnect(){}};
   w.localStorage.setItem('gdt-harness-store',JSON.stringify([['gdt:settings',{token:'harness-token',docsTabPosition:position}]]));
   w.eval(fixture);w.__gdtHarness.confluenceError=sessionError;w.eval(bundle.outputFiles[0].text);
@@ -29,7 +31,7 @@ for(const repo of ['empty','private'])test(`Confluence remains usable when GitHu
     assert.match(d.querySelector('[data-gdt-article]').textContent,/Platform overview/);
   }finally{w.close();}
 });
-for(const modifier of ['ctrlKey','metaKey'])test(`${modifier}+K opens Confluence-only Docs and preserves the configured tab position`,async()=>{
+for(const modifier of ['ctrlKey','metaKey'])test(`${modifier}+K opens search for a Confluence-only repository and preserves the configured tab position`,async()=>{
   const dom=open('empty',{hash:'',position:1}),w=dom.window,d=w.document;
   try {
     await waitFor(()=>d.querySelector('[data-gdt-tab]'));
@@ -37,10 +39,14 @@ for(const modifier of ['ctrlKey','metaKey'])test(`${modifier}+K opens Confluence
     assert.equal(d.querySelector('[data-gdt-count]').hidden,true);
     const key=new w.KeyboardEvent('keydown',{key:'k',[modifier]:true,bubbles:true,cancelable:true});
     w.dispatchEvent(key);
-    await waitFor(()=>d.activeElement?.hasAttribute('data-gdt-search')&&d.querySelector('[data-gdt-confluence-space]'));
+    await waitFor(()=>d.activeElement?.hasAttribute('data-gdt-palette-input'));
     assert.equal(key.defaultPrevented,true);
-    assert.ok(d.querySelector('[data-gdt-confluence-space]'));
+    assert.equal(d.querySelector('#gdt-root'),null);
+    assert.equal(w.location.hash,'');
+    assert.ok(d.querySelector('#gdt-command-palette[open]'));
     assert.equal(d.querySelector('.gdt-toast'),null);
+    d.querySelector('[data-gdt-palette-close]').click();
+    await new Promise(resolve=>setTimeout(resolve,20));
   }finally{w.close();}
 });
 test('Confluence sign-in errors leave GitHub docs usable',async()=>{
@@ -71,4 +77,19 @@ test('personal attachments persist across repository soft navigation',async()=>{
     assert.match(d.querySelector('.gdt-confluence-attached').parentElement.textContent,/gadget/);
     assert.equal(d.querySelectorAll('a[data-gdt-confluence-page]').length,1);
   }finally{w.close();}
+});
+
+test('opening Docs after palette indexing retains tag chips and inline search',async()=>{
+  const dom=open('widget',{hash:''}),w=dom.window,d=w.document;
+  try {
+    await waitFor(()=>d.querySelector('[data-gdt-tab]'));
+    w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'k',metaKey:true,bubbles:true,cancelable:true}));
+    await waitFor(()=>d.querySelector('#gdt-palette-results .gdt-sr-item')&&!d.querySelector('#gdt-palette-results .gdt-sr-note'));
+    d.querySelector('[data-gdt-palette-close]').click();
+    w.location.hash='#docs';
+    await waitFor(()=>d.querySelector('[data-gdt-article]'));
+    assert.ok(d.querySelector('.gdt-tag-chip'));
+    d.querySelector('.gdt-tag-chip').click();
+    assert.equal(d.querySelector('[data-gdt-search]').getAttribute('aria-expanded'),'true');
+  } finally {w.close();}
 });
