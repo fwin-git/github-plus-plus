@@ -19,6 +19,8 @@ The **Docs** tab shows Markdown files with a file tree, search, and a table of c
 Press **Cmd+K** or **Ctrl+K** from any repository page to open the floating documentation search palette. Choose a result to open it in Docs; press Escape to return to your page.
 You can change the tab position in **Options**.
 
+![Global command palette with fuzzy filename matches, document content results, and keyboard navigation](media/command-palette.jpg)
+
 [Confluence Cloud](docs/confluence.md) pages appear in their own site and space groups. Connect a site using your browser login, read pages in Docs, and attach them to repository groups. Attachments are personal settings saved in your browser.
 
 ![Documentation viewer with a file tree and table of contents](media/docs.png)
