@@ -19,7 +19,12 @@ jobs:
       - name: Unit tests
         run: npm test
       - name: Browser tests
-        run: npm run test:browser
+        # The runner's Chrome has an AppArmor profile for its sandbox.
+        # Puppeteer's downloaded Chrome does not have that profile.
+        run: |
+          CHROME_PATH="$(command -v google-chrome)"
+          export CHROME_PATH
+          npm run test:browser
       - name: Build
         run: npm run build
       - name: Syntax-check bundles
