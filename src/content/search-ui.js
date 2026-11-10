@@ -5,7 +5,7 @@ import { parseQuery, searchFiles } from '../common/search.js';
 import { githubSlug } from '../common/slugger.js';
 import { basename } from '../common/paths.js';
 
-export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIndexState, getOrgResults, onNavigate }) {
+export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIndexState, getOrgResults, getConfluenceResults, onNavigate }) {
   let items = [];
   let active = -1;
   let timer = 0;
@@ -144,6 +144,11 @@ export function createSearchUI({ input, panel, getDocs, getMeta, getIndex, getIn
           snippet: r.snippet && r.snippet.text ? r.snippet : null,
         });
       }
+    }
+    const confluenceResults = getConfluenceResults ? getConfluenceResults(parsed) : [];
+    if (confluenceResults.length) {
+      addGroup('Confluence');
+      for (const result of confluenceResults) addItem(result);
     }
     const orgResults = getOrgResults ? getOrgResults(parsed) : [];
     if (orgResults.length) {

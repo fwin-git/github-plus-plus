@@ -11,8 +11,30 @@ li[data-gdt-tab] .gdt-tab > [data-component="icon"] { display: inline-flex; alig
 li[data-gdt-tab] .gdt-tab svg { flex: none; margin: 0; vertical-align: middle; }
 li[data-gdt-tab] [data-gdt-count] { margin: 0; line-height: 20px; }
 li[data-gdt-tab] [data-gdt-count][hidden] { display: none !important; }
+#gdt-root [hidden] {
+  display: none !important;
+}
+
+#gdt-root, #gdt-root * {
+  box-sizing: border-box;
+}
 
 /* ---- theme tokens --------------------------------------------------------- */
+
+#gdt-root .gdt-confluence-group { margin: 4px 0; }
+#gdt-root .gdt-confluence-group > summary { padding: 8px 10px; cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+#gdt-root .gdt-confluence-group > summary:hover { background: var(--gdt-bg-muted); }
+#gdt-root .gdt-confluence-site { border-top: 1px solid var(--gdt-border); margin-top: 12px; padding-top: 8px; }
+#gdt-root .gdt-confluence-label { padding: 6px 10px; font-size: 12px; font-weight: 600; color: var(--gdt-fg-muted); overflow-wrap: anywhere; }
+#gdt-root .gdt-confluence-note { padding: 4px 10px; color: var(--gdt-fg-muted); font-size: 12px; overflow-wrap: anywhere; }
+#gdt-root .gdt-confluence-note button { margin: 4px 4px 4px 0; }
+#gdt-root .gdt-confluence-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; margin: 16px 0; background: var(--gdt-bg-muted); border: 1px solid var(--gdt-border); border-radius: 6px; }
+#gdt-root .gdt-confluence-controls input { padding: 6px 8px; width: min(260px, 65vw); color: var(--gdt-fg); background: var(--gdt-bg); border: 1px solid var(--gdt-border); border-radius: 6px; }
+#gdt-root .gdt-confluence-controls [role='status'] { flex-basis: 100%; padding: 0; }
+#gdt-root .gdt-confluence-image { display: block; padding: 12px; border: 1px solid var(--gdt-border); border-radius: 6px; }
+#gdt-root .gdt-confluence-pages a { white-space: normal; overflow-wrap: anywhere; }
+#gdt-root .gdt-confluence-pages a[aria-current] { background: var(--gdt-accent-bg); color: var(--gdt-accent); font-weight: 600; }
+#gdt-root .gdt-confluence-original { display: inline-block; margin-top: 4px; }
 
 #gdt-root {
   --gdt-bg: var(--bgColor-default, #ffffff);

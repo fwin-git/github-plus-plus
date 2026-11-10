@@ -1,4 +1,5 @@
 import { DEFAULTS, loadSettings, saveSettings } from '../common/settings.js';
+import { initConfluenceOptions } from './confluence-options.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,6 +35,7 @@ function showStatus(el, text, ok) {
 }
 
 async function init() {
+  initConfluenceOptions();
   fill(await loadSettings());
 
   $('save').addEventListener('click', async () => {

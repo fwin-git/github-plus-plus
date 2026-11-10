@@ -129,6 +129,9 @@ Makes a widget.
   // Seed a token so the propose-PR flow (and token-mode content fetching via
   // the contents API) can be exercised against the stubbed endpoints below.
   if (!store.has('gdt:settings')) store.set('gdt:settings', { token: 'harness-token' });
+  const confluenceSite = 'https://example.atlassian.net';
+  if (new URLSearchParams(location.search).has('confluence')) store.set('gdt:confluence-sites', [confluenceSite]);
+  const changesListeners = [];
   const storageArea = {
     async get(keys) {
       const out = {};
@@ -137,17 +140,37 @@ Makes a widget.
       return out;
     },
     async set(obj) {
+      const changes = Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, {oldValue:store.get(k),newValue:v}]));
       for (const [k, v] of Object.entries(obj)) store.set(k, v);
       persist();
+      for (const fn of changesListeners) fn(changes, 'local');
     },
     async remove(keys) {
-      for (const k of Array.isArray(keys) ? keys : [keys]) store.delete(k);
+      const changes = {};
+      for (const k of Array.isArray(keys) ? keys : [keys]) { changes[k] = {oldValue:store.get(k)}; store.delete(k); }
       persist();
+      for (const fn of changesListeners) fn(changes, 'local');
     },
   };
   window.chrome = {
-    storage: { local: storageArea, onChanged: { addListener() {} } },
-    runtime: { openOptionsPage() {} },
+    storage: { local: storageArea, onChanged: { addListener(fn) { changesListeners.push(fn); } } },
+    runtime: {
+      openOptionsPage() {},
+      async sendMessage({type,operation,site,id}) {
+        if (type !== 'gdt:confluence' || site !== confluenceSite) return {ok:false,error:{message:'Unknown fixture site'}};
+        if (window.__gdtHarness.confluenceError) return {ok:false,error:{code:'SESSION',message:'Sign in to Confluence in this browser profile.'}};
+        const pages = [
+          {site,id:'101',spaceId:'10',title:'Platform overview'},
+          {site,id:'102',spaceId:'10',parentId:'101',title:'Getting connected'},
+          {site,id:'103',spaceId:'10',title:'Release checklist'},
+        ];
+        if (operation === 'spaces') return {ok:true,data:{items:[{site,id:'10',title:'Engineering'}],nextCursor:null}};
+        if (operation === 'pages') return {ok:true,data:{items:pages,nextCursor:null}};
+        const page = pages.find(p=>p.id===id);
+        if (!page) return {ok:false,error:{message:'Page not found'}};
+        return {ok:true,data:{...page,url:site+'/wiki/pages/viewpage.action?pageId='+id,html:'<h2 id="overview">Overview</h2><p>This Confluence page lives independently of the repository. Attach it using the controls above.</p><h2 id="next">Next steps</h2><ul><li>Connect your site</li><li>Choose a space</li><li>Organize your pages</li></ul><p><a href="/wiki/spaces/ENG/pages/102/Getting-connected">Getting connected</a></p><table><tr><th>Source</th><th>Access</th></tr><tr><td>Confluence Cloud</td><td>Browser login</td></tr></table>'}};
+      },
+    },
   };
 
   // ---- fetch stub -----------------------------------------------------------
@@ -164,6 +187,8 @@ Makes a widget.
 
     let m = /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/git\/trees\/HEAD\?recursive=1$/.exec(url);
     if (m) {
+      if (m[2] === 'empty') return json({sha:'empty',tree:[],truncated:false});
+      if (m[2] === 'private') return json({message:'Not found'},404);
       if (m[2] === 'gadget') {
         const t = Object.keys(GADGET_FILES).map((path) => ({ path, type: 'blob', sha: 'g-' + path, size: 200 }));
         t.push({ path: 'docs', type: 'tree', sha: 'g-docs' });

@@ -95,6 +95,7 @@ code {
 }
 
 input[type='password'],
+input[type='url'],
 input[type='number'],
 select,
 textarea {
@@ -173,3 +174,7 @@ button.primary {
 .status.err {
   color: var(--danger);
 }
+
+#confluence-sites { padding: 0; list-style: none; }
+#confluence-sites li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+#confluence-sites a { color: var(--accent); flex: 1 1 250px; }

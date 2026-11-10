@@ -13,7 +13,7 @@ import { buildResolver } from '../common/wikilinks.js';
 import { ContentIndex } from '../common/search.js';
 import { normalizeTags, docTitle, parseFrontmatter, isPinned } from '../common/frontmatter.js';
 import { resolveRelative, splitAnchor, isMarkdownPath, dirname, basename } from '../common/paths.js';
-import { buildHash } from '../common/route.js';
+import { buildHash, buildConfluenceHash } from '../common/route.js';
 import { githubSlug } from '../common/slugger.js';
 import { mdToPlainText, extractHeadings, bestHeadingTitle } from '../common/md-text.js';
 import { buildUnifiedPatch } from '../common/diff.js';
@@ -27,6 +27,9 @@ import { loadDrafts, saveDraft, removeDraft, clearDrafts } from './drafts.js';
 import { loadOrgSelection, saveOrgSelection, buildOrgIndex, saveOrgSnapshot, loadOrgSnapshot, clearOrgSnapshot, indexOrgContent, ORG_SEP } from './org.js';
 import { getCachedShaSet, repoContentCached } from './blob-cache.js';
 import { RateLimitError } from './github-api.js';
+import { createConfluenceViewer } from './confluence-viewer.js';
+import { renderConfluence } from './confluence-render.js';
+import { pageUrl } from '../common/confluence.js';
 
 const ICONS = {
   chevron:
@@ -69,7 +72,7 @@ const ICONS = {
     '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"></path></svg>',
 };
 
-export function createViewer({ client, settings, docs, truncated, total, onRequestRefresh }) {
+export function createViewer({ client, settings, docs, truncated, total, onRequestRefresh, confluenceSites = [], githubError = null }) {
   const docByPath = new Map(docs.map((d) => [d.path, d]));
   const metaByPath = new Map();
   const contentCache = new Map();
@@ -85,6 +88,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   let searchUI = null;
   let mounted = false;
   let currentPath = null;
+  let confluenceRoute = null;
   let loadSeq = 0;
   let origTitle = null;
   let keydownHandler = null;
@@ -98,6 +102,11 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   let drafts = {}; // { [path]: {content, baseSha, savedAt} } — staged session edits
   let orgSession = null; // { org, index, repoDocs, totalDocs, errors }
   const orgExpanded = new Set([client.repo]);
+  const confluence = confluenceSites.length ? createConfluenceViewer({
+    sites: confluenceSites,
+    repository: `${client.owner}/${client.repo}`.toLowerCase(),
+    onChange: () => { if (mounted) renderTree(); },
+  }) : null;
   loadDrafts(client.owner, client.repo).then((d) => {
     drafts = d;
     if (mounted) {
@@ -350,6 +359,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       getMeta: () => displayMeta(),
       getIndex: () => index,
       getIndexState: () => indexState,
+      getConfluenceResults: parsed => confluence?.search(parsed) || [],
       getOrgResults: (parsed) => {
         if (!orgSession || !orgSession.index.size) return [];
         return orgSession.index.search(parsed, { limit: 12 }).map((r) => {
@@ -416,9 +426,10 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       if (currentPath) openEditor(currentPath);
     });
     refs.copyLink.addEventListener('click', () => {
-      if (!currentPath) return;
+      if (!currentPath && !confluenceRoute) return;
       const activeSlug = refs.toc.querySelector('a.gdt-toc-active')?.getAttribute('data-gdt-toc-slug') || null;
-      const url = `https://github.com/${client.owner}/${client.repo}${buildHash({ path: currentPath, heading: activeSlug })}`;
+      const hash = confluenceRoute ? buildConfluenceHash({ ...confluenceRoute, heading: activeSlug }) : buildHash({ path: currentPath, heading: activeSlug });
+      const url = `https://github.com/${client.owner}/${client.repo}${hash}`;
       copyText(url).then((ok) => {
         refs.copyLink.innerHTML = ok ? ICONS.check : ICONS.link;
         refs.copyLink.title = ok ? 'Link copied!' : 'Clipboard unavailable';
@@ -561,6 +572,9 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     if (!mounted) return;
     if (editor) closeEditor(true);
     mounted = false;
+    loadSeq++;
+    confluence?.stop();
+    confluenceRoute = null;
     document.removeEventListener('keydown', keydownHandler, true);
     if (tocObserver) {
       tocObserver.disconnect();
@@ -648,15 +662,29 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     }
     const treeEl = refs.tree;
     treeEl.textContent = '';
+    const repoBodies = new Map();
+    let filesContainer = treeEl;
+    if (confluence) {
+      const group = document.createElement('details');
+      group.className = 'gdt-confluence-group'; group.open = true;
+      const summary = document.createElement('summary'); summary.textContent = `${client.owner}/${client.repo}`;
+      group.append(summary); treeEl.append(group); filesContainer = group;
+      repoBodies.set(`${client.owner}/${client.repo}`.toLowerCase(), group);
+      if (githubError) {
+        const note = document.createElement('p'); note.className = 'gdt-confluence-note'; note.textContent = githubError;
+        group.append(note);
+      }
+    }
     const list = renderNodes(tree, 0);
     if (treeFilter && !list.querySelector('a')) {
       const empty = document.createElement('div');
       empty.className = 'gdt-tree-empty';
       empty.textContent = 'No files match the filter';
-      treeEl.appendChild(empty);
+      filesContainer.appendChild(empty);
     } else {
-      treeEl.appendChild(list);
+      filesContainer.appendChild(list);
     }
+    confluence?.decorate(treeEl, repoBodies, treeFilter, confluenceRoute);
     renderPinned();
     renderDrafts();
     markSelection();
@@ -706,6 +734,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     const treeEl = refs.tree;
     treeEl.textContent = '';
     orgSession.ringEls = new Map();
+    const repoBodies = new Map();
     const repos = [...orgSession.repoDocs.keys()].sort((a, b) =>
       a === client.repo ? -1 : b === client.repo ? 1 : a.localeCompare(b)
     );
@@ -731,6 +760,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       paintRing(repo);
       const isCurrent = repo === client.repo;
       const body = document.createElement('div');
+      repoBodies.set(`${client.owner}/${repo}`.toLowerCase(), body);
       // Prompt shown when expanding an unindexed, non-current repo. Reads the
       // LIVE index state (not the render-time `repoIndexed`) so a repo indexed
       // via this prompt is not re-prompted after collapse/expand.
@@ -767,6 +797,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       group.appendChild(body);
       treeEl.appendChild(group);
     }
+    confluence?.decorate(treeEl, repoBodies, treeFilter, confluenceRoute);
     const errs = orgSession.errors || [];
     if (errs.length) {
       const note = document.createElement('div');
@@ -874,7 +905,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   }
 
   function markSelection() {
-    for (const el of refs.sidebar.querySelectorAll('a[aria-current]')) el.removeAttribute('aria-current');
+    for (const el of refs.sidebar.querySelectorAll('a[data-gdt-tree-path][aria-current]')) el.removeAttribute('aria-current');
     if (!currentPath) return;
     const els = refs.sidebar.querySelectorAll(`a[data-gdt-tree-path="${cssEscape(currentPath)}"]`);
     els.forEach((el) => el.setAttribute('aria-current', 'page'));
@@ -986,6 +1017,14 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
   }
 
   async function renderRoute(route) {
+    if (route.source === 'confluence') {
+      if (editor && !closeEditor(false)) { location.hash = buildHash({ path: editor.path }); return; }
+      await renderConfluenceArticle(route);
+      return;
+    }
+    const wasConfluence = Boolean(confluenceRoute);
+    confluenceRoute = null;
+    if (wasConfluence) renderTree();
     const target = route.path ?? defaultPath();
     if (editor) {
       if (target === editor.path) return; // stay in the editor
@@ -995,7 +1034,10 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       }
     }
     if (!target) {
-      renderMessage('No documentation found', 'This repository has no markdown documents in its docs folders.');
+      ++loadSeq;
+      refs.liveEdit.disabled = refs.copyMd.disabled = refs.copyLink.disabled = true;
+      refs.editGh.hidden = true;
+      renderMessage('Choose a document', githubError || (confluence ? 'Browse Confluence spaces in the sidebar, or connect another site in extension Options.' : 'This repository has no markdown documents in its docs folders.'));
       return;
     }
     if (target === currentPath && !refs.article.querySelector('[data-gdt-error]')) {
@@ -1013,6 +1055,10 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     else markSelection();
     refs.article.innerHTML = '<div class="gdt-loading"><div class="gdt-spinner"></div>Loading…</div>';
     refs.toc.hidden = true;
+    refs.editGh.hidden = false;
+    refs.openGh.innerHTML = ICONS.github;
+    refs.openGh.title = 'View on GitHub';
+    refs.liveEdit.disabled = refs.copyMd.disabled = refs.copyLink.disabled = true;
 
     let source = contentCache.get(path);
     if (source == null) {
@@ -1064,6 +1110,50 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     renderToc(rd.toc);
     if (heading) scrollToHeading(heading);
     else window.scrollTo({ top: 0 });
+  }
+
+  async function renderConfluenceArticle(route) {
+    const seq = ++loadSeq;
+    currentPath = null;
+    confluenceRoute = route;
+    refs.liveEdit.disabled = refs.copyMd.disabled = true;
+    refs.copyLink.disabled = false;
+    refs.editGh.hidden = true;
+    refs.openGh.innerHTML = ICONS.external;
+    refs.openGh.title = 'Open in Confluence';
+    refs.openGh.href = pageUrl(route.site, route.pageId);
+    refs.crumbs.textContent = 'Confluence';
+    refs.toc.hidden = true;
+    if (tocObserver) { tocObserver.disconnect(); tocObserver = null; }
+    refs.article.innerHTML = '<div class="gdt-loading"><div class="gdt-spinner"></div>Loading Confluence page…</div>';
+    renderTree();
+    try {
+      if (!confluence) throw new Error('Add this Confluence site in extension Options first.');
+      const page = await confluence.fetchPage(route);
+      if (seq !== loadSeq || !mounted) return;
+      const rendered = renderConfluence(page);
+      refs.article.replaceChildren();
+      const title = document.createElement('h1'); title.className = 'gdt-doc-title'; title.textContent = page.title;
+      const source = document.createElement('a'); source.textContent = 'Open in Confluence'; source.href = page.url;
+      source.target = '_blank'; source.rel = 'noopener noreferrer'; source.className = 'gdt-confluence-original';
+      const note = document.createElement('p'); note.className = 'gdt-confluence-note';
+      note.textContent = 'Read-only view. Open Confluence for images, interactive macros, comments, or editing.';
+      const body = document.createElement('div'); body.className = 'gdt-md'; body.append(rendered.fragment);
+      refs.article.append(title, source, confluence.controls(page), note, body);
+      refs.crumbs.textContent = `Confluence / ${page.title}`;
+      document.title = `${page.title} · Confluence · Docs`;
+      renderToc(rendered.toc);
+      if (route.heading) scrollToHeading(route.heading);
+      else window.scrollTo({ top: 0 });
+    } catch (error) {
+      if (seq !== loadSeq || !mounted) return;
+      renderMessage('Cannot read Confluence page', error.message);
+      if (confluence) refs.article.append(confluence.recovery('Check the connection and try again.', route.site, () => renderConfluenceArticle(route)));
+      else {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'gdt-btn'; button.textContent = 'Connection settings';
+        button.addEventListener('click', () => ext.runtime.openOptionsPage()); refs.article.append(button);
+      }
+    }
   }
 
   // Slim banner shown at the top of drafted documents in reading mode.
@@ -1544,7 +1634,9 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
       li.className = `gdt-toc-l${entry.level}`;
       const a = document.createElement('a');
       a.textContent = entry.text;
-      a.href = buildHash({ path: currentPath, heading: entry.slug });
+      a.href = confluenceRoute
+        ? buildConfluenceHash({ ...confluenceRoute, heading: entry.slug })
+        : buildHash({ path: currentPath, heading: entry.slug });
       a.setAttribute('data-gdt-toc-slug', entry.slug);
       li.appendChild(a);
       ul.appendChild(li);
@@ -1573,7 +1665,7 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
     if (!anchor) return;
     const tryIds = [anchor, githubSlug(anchor), `user-content-${anchor}`];
     for (const id of tryIds) {
-      const el = refs.article.querySelector(`#${cssEscape(id)}`) || refs.article.querySelector(`[name="${cssEscape(id)}"]`);
+      const el = refs.article.querySelector(`#${cssEscape(id)}`) || refs.article.querySelector(`#${cssEscape('gdt-cf-' + id)}`) || refs.article.querySelector(`[name="${cssEscape(id)}"]`);
       if (el) {
         el.scrollIntoView({ block: 'start' });
         el.classList.add('gdt-flash');
@@ -2081,11 +2173,13 @@ export function createViewer({ client, settings, docs, truncated, total, onReque
         applyTheme();
         startIndexing();
         maybeRestoreOrg();
+        confluence?.start().catch(() => {});
       }
       await renderRoute(route);
     },
     close,
     focusSearch: () => searchUI?.focus(),
+    refreshConfluenceAttachments: () => confluence?.reloadAttachments(),
     isOpen: () => mounted,
   };
 }

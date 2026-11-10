@@ -39,7 +39,7 @@ The extension persists across restarts.
 
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on…**
-3. Select `dist/manifest.json`
+3. Select `dist-firefox/manifest.json`
 
 > [!WARNING]
 > Firefox removes temporary add-ons every time it quits — that is a Firefox rule for unsigned extensions. Reload it the same way after a restart, or make it permanent:

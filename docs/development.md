@@ -12,8 +12,8 @@ order: 9
 ```bash
 npm install
 npm test           # unit tests (node:test) for all pure logic
-npm run test:browser # PR summary integration tests in temporary headless Chrome
-npm run build      # bundle to dist/
+npm run test:browser # PR and Docs integration tests in temporary headless Chrome
+npm run build      # bundle to dist/ (Chrome) and dist-firefox/ (Firefox)
 npm run zip        # build + store zips in artifacts/
 npm run watch      # rebuild bundles on change
 npm run media      # regenerate the README screenshots from local example data

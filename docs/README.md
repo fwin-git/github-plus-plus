@@ -14,6 +14,7 @@ If a **Docs** tab brought you here — good, that's the extension working. This 
 
 ## Using it
 
+- [[Confluence Cloud]] — browse spaces and personally attach pages to repositories
 - [[Organization-wide Search]] — index and search many repositories at once
 - [[Editing & Publishing]] — the live editor, drafts, and pull requests
 - [[Interface & Shortcuts]] — sidebar, toolbar icons, deep links, themes, keyboard

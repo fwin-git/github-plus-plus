@@ -21,7 +21,7 @@ npm run install-ext -- --browser firefox --trial  # via `npx web-ext run`
 ## What happens
 
 1. **Chromium family** (Brave, Edge, Chromium, Chrome): a separate window opens using a throwaway profile in your temp directory, launched with `--load-extension=dist`. Close the window and the profile is inert.
-2. **Firefox**: the CLI runs Mozilla's [`web-ext run`](https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/) (fetched on first use via `npx`), which starts a fresh profile with the extension pre-loaded and live-reloads it when `dist/` changes. Keep the terminal open; `Ctrl+C` ends the session.
+2. **Firefox**: the CLI runs Mozilla's [`web-ext run`](https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/) (fetched on first use via `npx`), which starts a fresh profile with the extension pre-loaded and live-reloads it when `dist-firefox/` changes. Keep the terminal open; `Ctrl+C` ends the session.
 
 ## Caveats
 

@@ -40,6 +40,10 @@ You only need a token for **private repositories**, the higher rate limit, or th
 
 Then paste it in Options → **Test** → **Save token**, and confirm the *"Currently saved:"* line shows the right token type. Reload any open GitHub tabs.
 
+## Confluence connections
+
+Under **Confluence Cloud**, add an HTTPS `*.atlassian.net` site and grant permission for that site. The extension uses your existing browser login. **Reconnect** checks the connection and requests permission again if needed; **Remove** revokes it and removes personal attachments for that site. These connections are saved separately from GitHub settings and are kept when restoring behavior defaults. See [[Confluence Cloud]] for grouping, attachments, and limitations.
+
 ## The popup
 
 The toolbar popup shows token status, a list of [[Caching & Performance|cached repositories]] (each links to its Docs tab, with age and per-repo eviction), the file-content cache size, and a button to clear the caches.

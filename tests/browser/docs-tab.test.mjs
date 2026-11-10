@@ -12,7 +12,7 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-async function fixture(t, { path = '/acme/widget', position = 'last', gate } = {}) {
+async function fixture(t, { path = '/acme/widget', position = 'last', gate, confluence = false } = {}) {
   const page = await browser.newPage();
   t.after(() => page.close());
   const nav = `<nav aria-label="Repository"><ul>${['Code', 'Issues', 'Settings'].map((label, i) => `<li class="repo-item"><a class="repo-tab" href="/acme/widget${i ? '/' + label.toLowerCase() : ''}"><span data-component="icon"><svg width="16" height="16"></svg></span><span data-component="text">${label}</span></a></li>`).join('')}</ul></nav>`;
@@ -30,19 +30,48 @@ async function fixture(t, { path = '/acme/widget', position = 'last', gate } = {
     if (url.hostname === 'raw.githubusercontent.com') return req.respond({ status: 200, headers, body: '# Guide\nHello docs' });
     return req.respond({ status: 404, headers, contentType: 'application/json', body: '{}' });
   });
-  await page.evaluateOnNewDocument(position => {
+  await page.evaluateOnNewDocument(({position,confluence}) => {
     const data = { 'gdt:settings': { docsTabPosition: position } }, listeners = [];
     window.chrome = { storage: { local: { get: async key => typeof key === 'string' ? { [key]: data[key] } : data, set: async patch => Object.assign(data, patch) }, onChanged: { addListener: fn => listeners.push(fn) } } };
+    if (confluence) {
+      const site='https://example.atlassian.net';
+      data['gdt:confluence-sites']=[site];
+      window.chrome.runtime={async sendMessage({operation,id}) {
+        if(operation==='spaces')return {ok:true,data:{items:[{site,id:'10',title:'Engineering'}],nextCursor:null}};
+        if(operation==='pages')return {ok:true,data:{items:[{site,id:'101',spaceId:'10',title:'Cloud guide'}],nextCursor:null}};
+        return {ok:true,data:{site,id,spaceId:'10',title:'Cloud guide',html:'<h2 id="one">One</h2><h2 id="two">Two</h2>',url:site+'/wiki/pages/viewpage.action?pageId='+id}};
+      }};
+    }
     window.changePosition = position => {
       data['gdt:settings'].docsTabPosition = position;
       listeners.forEach(fn => fn({ 'gdt:settings': { newValue: { ...data['gdt:settings'] } } }, 'local'));
     };
-  }, position);
+  }, {position,confluence});
   await page.goto('https://github.com' + path);
   await page.addStyleTag({ path: 'src/content/viewer.css' });
   await page.addScriptTag({ content });
   return page;
 }
+
+test('Confluence hides GitHub editing controls and keeps heading routes inside Docs', async t => {
+  const page=await fixture(t,{confluence:true,path:'/acme/widget#docs?source=confluence&site=https%3A%2F%2Fexample.atlassian.net&page=101'});
+  await page.setViewport({width:1440,height:900});
+  await page.waitForSelector('.gdt-confluence-controls');
+  assert.equal(await page.$eval('[data-gdt-edit-gh]',el=>getComputedStyle(el).display),'none');
+  assert.equal(await page.$eval('[data-gdt-live-edit]',el=>el.disabled),true);
+  const headings=await page.$$eval('[data-gdt-toc-slug]',els=>els.map(el=>el.hash));
+  assert.equal(headings.length,2);
+  assert.ok(headings.every(hash=>hash.includes('source=confluence')&&hash.includes('page=101')));
+  await page.click('[data-gdt-toc-slug="gdt-cf-two"]');
+  await page.waitForFunction(()=>location.hash.includes('h=gdt-cf-two')&&document.querySelector('.gdt-confluence-controls'));
+  await page.click('.gdt-confluence-controls button[type="submit"]');
+  await page.waitForSelector('.gdt-confluence-attached a');
+  assert.equal(await page.$$eval('a[data-gdt-confluence-page]',els=>els.length),1);
+  await page.click('a[data-gdt-tree-path="docs/guide.md"]');
+  await page.waitForFunction(()=>document.querySelector('[data-gdt-article]')?.textContent.includes('Hello docs'));
+  assert.notEqual(await page.$eval('[data-gdt-edit-gh]',el=>getComputedStyle(el).display),'none');
+  assert.equal(await page.$eval('[data-gdt-live-edit]',el=>el.disabled),false);
+});
 
 test('Docs tab follows configured position and aligns icon, label, and badge with native tabs', async t => {
   const page = await fixture(t, { position: 2 });

@@ -3,7 +3,7 @@
 //   node build.mjs --watch   rebuild on change
 //   node build.mjs --zip     build + store zips in artifacts/
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -11,10 +11,12 @@ const watch = process.argv.includes('--watch');
 const zip = process.argv.includes('--zip');
 const root = new URL('.', import.meta.url).pathname;
 const dist = join(root, 'dist');
+const firefoxDist = join(root, 'dist-firefox');
 
 const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 
 rmSync(dist, { recursive: true, force: true });
+rmSync(firefoxDist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
 const buildOptions = {
@@ -22,6 +24,7 @@ const buildOptions = {
     { in: 'src/content/index.js', out: 'content' },
     { in: 'src/options/options.js', out: 'options' },
     { in: 'src/popup/popup.js', out: 'popup' },
+    { in: 'src/background/index.js', out: 'background' },
   ],
   bundle: true,
   format: 'iife',
@@ -31,6 +34,7 @@ const buildOptions = {
   legalComments: 'none',
   minify: false,
   sourcemap: false,
+  plugins: [{ name: 'browser-packages', setup(build) { build.onEnd(result => { if (!result.errors.length) copyStatic(); }); } }],
 };
 
 function copyStatic() {
@@ -49,24 +53,26 @@ function copyStatic() {
     }
     cpSync(icon, join(dist, `icons/icon${size}.png`));
   }
+  cpSync(dist, firefoxDist, { recursive: true });
+  const firefoxManifest = { ...manifest, background: { scripts: ['background.js'] }, optional_permissions: manifest.optional_host_permissions };
+  delete firefoxManifest.optional_host_permissions;
+  writeFileSync(join(firefoxDist, 'manifest.json'), JSON.stringify(firefoxManifest, null, 2) + '\n');
 }
 
 if (watch) {
   const ctx = await esbuild.context(buildOptions);
-  copyStatic();
   await ctx.watch();
-  console.log('watching… (static files copied once; rerun on manifest/css/html changes)');
+  console.log('watching… (static files copied after each bundle; rerun on manifest/css/html changes)');
 } else {
   await esbuild.build(buildOptions);
-  copyStatic();
-  console.log('built dist/');
+  console.log('built dist/ and dist-firefox/');
   if (zip) {
     const artifacts = join(root, 'artifacts');
     mkdirSync(artifacts, { recursive: true });
     for (const browser of ['chrome', 'firefox']) {
       const out = join(artifacts, `github-plus-plus-${browser}-v${manifest.version}.zip`);
       rmSync(out, { force: true });
-      execFileSync('zip', ['-r', '-q', out, '.'], { cwd: dist });
+      execFileSync('zip', ['-r', '-q', out, '.'], { cwd: browser === 'firefox' ? firefoxDist : dist });
       console.log(`wrote ${out}`);
     }
   }

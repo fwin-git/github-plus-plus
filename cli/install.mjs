@@ -71,7 +71,7 @@ function copyToClipboard(text) {
 
 async function main() {
   // 1. Make sure dist/ exists.
-  if (!existsSync(join(distPath, 'manifest.json'))) {
+  if (!existsSync(join(distPath, 'manifest.json')) || !existsSync(join(root, 'dist-firefox/manifest.json'))) {
     console.log(dim('dist/ not built yet — running build…'));
     const r = spawnSync(process.execPath, [join(root, 'build.mjs')], { stdio: 'inherit' });
     if (r.status !== 0) {
@@ -117,7 +117,7 @@ async function main() {
 
   // 4. Build and execute the plan.
   const tmpDir = mode === 'trial' ? await mkdtemp(join(tmpdir(), 'gdt-trial-')) : null;
-  const plan = buildPlan(browser, { distPath, mode, tmpDir, platform: process.platform });
+  const plan = buildPlan(browser, { distPath: browser.id === 'firefox' ? join(root, 'dist-firefox') : distPath, mode, tmpDir, platform: process.platform });
 
   if (has('--dry-run')) {
     console.log(bold(`\nPlan for ${browser.name} (${mode}):`));

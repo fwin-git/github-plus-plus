@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Github++",
   "version": "0.2.0",
-  "description": "Adds documentation search and separate code, test, and draft counts to GitHub repositories.",
+  "description": "Adds GitHub docs and Confluence Cloud reading, plus separate code, test, and draft counts for pull requests.",
   "homepage_url": "https://github.com/fwin-git/github-plus-plus",
   "icons": {
     "16": "icons/icon16.png",
@@ -14,6 +14,8 @@
     "storage",
     "unlimitedStorage"
   ],
+  "optional_host_permissions": ["https://*.atlassian.net/*"],
+  "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
       "matches": [

@@ -10,6 +10,8 @@ import { ensureTab, setTabActive, findRepoNav, tabConnected, removeTab } from '.
 import { createViewer } from './viewer.js';
 import { startPrStats } from './pr-stats.js';
 import { startPrCounts } from './pr-counts.js';
+import { confluenceStorage } from '../common/confluence-storage.js';
+import { CONFLUENCE_SITES_KEY, ATTACHMENT_PREFIX } from '../common/confluence.js';
 
 const prStats = startPrStats();
 const prCounts = startPrCounts();
@@ -61,16 +63,18 @@ let current = null; // { key, owner, repo, loading, settings, client, docs, trun
 let scanTimer = 0;
 let requestedSearch = null;
 
+const hasDocs = state => state?.docs && (state.docs.length || state.confluenceSites?.length || parseHash(location.hash)?.source === 'confluence');
+
 function updateDocsTab() {
-  if (!current?.docs?.length) return;
+  if (!hasDocs(current)) return;
   ensureTab({ owner: current.owner, repo: current.repo, count: current.total,
-    showBadge: current.settings.showBadge, position: current.settings.docsTabPosition });
+    showBadge: current.settings.showBadge && current.total > 0, position: current.settings.docsTabPosition });
 }
 
 function openRequestedSearch() {
   const info = parseRepo(location.pathname);
   if (!requestedSearch || requestedSearch !== current?.key || `${info?.owner}/${info?.repo}` !== requestedSearch || !current.docs) return;
-  if (!current.docs.length) {
+  if (!hasDocs(current)) {
     requestedSearch = null;
     showToast('No documentation found in this repository.');
     return;
@@ -126,13 +130,21 @@ async function scan({ forSearch = false } = {}) {
     const settings = await loadSettings();
     if (current !== me) return;
     me.settings = settings;
+    me.confluenceSites = await confluenceStorage.listSites();
+    if (current !== me) return;
     me.client = makeClient({
       owner: me.owner,
       repo: me.repo,
       token: settings.token,
       candidateFolders: settings.docsFolders,
     });
-    const treeRes = await me.client.getTree();
+    let treeRes;
+    try { treeRes = await me.client.getTree(); }
+    catch (error) {
+      if (!me.confluenceSites.length && parseHash(location.hash)?.source !== 'confluence') throw error;
+      me.githubError = error.message;
+      treeRes = { entries: [], truncated: false };
+    }
     if (current !== me) return;
     const { docs, truncated, total } = collectDocs(treeRes.entries, {
       folders: settings.docsFolders,
@@ -143,7 +155,7 @@ async function scan({ forSearch = false } = {}) {
     me.truncated = truncated || treeRes.truncated;
     me.total = total;
     document.documentElement.removeAttribute('data-gdt-error'); // stale diagnostics confuse debugging
-    if (docs.length) {
+    if (hasDocs(me)) {
       updateDocsTab();
       applyRoute();
     }
@@ -163,7 +175,7 @@ async function scan({ forSearch = false } = {}) {
 }
 
 function getViewer() {
-  if (!current || !current.docs || !current.docs.length) return null;
+  if (!hasDocs(current)) return null;
   if (!current.viewer) {
     current.viewer = createViewer({
       client: current.client,
@@ -172,6 +184,8 @@ function getViewer() {
       truncated: current.truncated,
       total: current.total,
       onRequestRefresh: refreshRepo,
+      confluenceSites: current.confluenceSites,
+      githubError: current.githubError,
     });
   }
   return current.viewer;
@@ -193,6 +207,7 @@ async function refreshRepo() {
     current.docs = docs;
     current.truncated = truncated || treeRes.truncated;
     current.total = total;
+    current.githubError = null;
     updateDocsTab();
     applyRoute();
   } catch (err) {
@@ -247,7 +262,7 @@ const observer = new MutationObserver(() => {
   // boot scan, and recovery from a died load. Repos confirmed to have zero
   // docs are excluded so we don't rescan forever.
   if (!findRepoNav() || tabConnected()) return;
-  if (current && current.docs && !current.docs.length) return;
+  if (current?.docs && !hasDocs(current)) return;
   scheduleScan();
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -272,6 +287,15 @@ onSettingsChanged((next) => {
   old?.viewer?.close();
   removeTab();
   scheduleScan();
+});
+
+ext.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes[CONFLUENCE_SITES_KEY]) {
+    current?.viewer?.close(); current = null; removeTab(); scheduleScan();
+  } else if (Object.keys(changes).some(key => key.startsWith(ATTACHMENT_PREFIX))) {
+    current?.viewer?.refreshConfluenceAttachments()?.catch(() => {});
+  }
 });
 
 // ---- "Propose via GitHub editor" handoff ------------------------------------

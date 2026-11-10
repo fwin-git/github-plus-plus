@@ -32,6 +32,17 @@
     </section>
 
     <section>
+      <h2>Confluence Cloud <span class="optional">optional</span></h2>
+      <p class="hint">Connect a site using your existing Confluence login in this browser profile. Allow access to that site when prompted. No API token is needed. Pages start in their Confluence space groups; repository attachments are personal to this browser.</p>
+      <div class="row">
+        <input id="confluence-site" type="url" aria-label="Confluence Cloud site" placeholder="https://team.atlassian.net" spellcheck="false" />
+        <button id="connect-confluence" type="button">Connect</button>
+      </div>
+      <p id="confluence-status" class="status" role="status"></p>
+      <ul id="confluence-sites"></ul>
+    </section>
+
+    <section>
       <h2>Documentation folders</h2>
       <p class="hint">
         One folder per line, matched case-insensitively at any nesting depth (e.g. <code>docs</code> also matches
