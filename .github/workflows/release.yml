@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.1.1 (bumps manifest + package.json, tags, and publishes)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Manual dispatch: bump version everywhere, commit, and create the tag so
+      # the rest of the job (and future checkouts) see a consistent version.
+      - name: Bump, commit, and tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          node -e "const fs=require('fs'),f='manifest.json',j=JSON.parse(fs.readFileSync(f));j.version='$VERSION';fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am "Release v$VERSION" || echo "nothing to commit"
+          git tag "v$VERSION"
+          git push origin HEAD:main
+          git push origin "v$VERSION"
+
+      - name: Verify manifest matches the release version
+        run: |
+          MV=$(node -p "require('./manifest.json').version")
+          if [ "$MV" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "manifest.json version ($MV) does not match tag (${{ steps.ver.outputs.version }})." >&2
+            echo "Bump manifest.json and package.json before tagging, or use the manual 'Run workflow' dispatch." >&2
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build store zips
+        run: npm run zip
+
+      - name: Generate release notes
+        run: |
+          CUR="${{ steps.ver.outputs.tag }}"
+          PREV=$(git tag --sort=-creatordate | grep -vx "$CUR" | head -n1 || true)
+          if [ -n "$PREV" ]; then RANGE="$PREV..HEAD"; else RANGE="HEAD"; fi
+          {
+            echo "## Github++ $CUR"
+            echo
+            echo "### Changes"
+            git log --no-merges --pretty=format:'- %s' "$RANGE" | grep -viE '^- (release v|bump )' || echo "- Initial release."
+            echo
+            echo
+            echo "### Install"
+            echo "- **Chrome / Brave / Edge / Chromium** — download \`github-plus-plus-chrome-$CUR.zip\`, unzip it, open \`chrome://extensions\`, enable Developer mode, and **Load unpacked** → the unzipped folder."
+            echo "- **Firefox** — download \`github-plus-plus-firefox-$CUR.zip\`, open \`about:debugging#/runtime/this-firefox\`, click **Load Temporary Add-on…**, and pick \`manifest.json\` from the unzipped folder. (For a permanent install, submit the zip to addons.mozilla.org.)"
+            echo
+            if [ -n "$PREV" ]; then
+              echo "**Full changelog**: ${{ github.server_url }}/${{ github.repository }}/compare/$PREV...$CUR"
+            fi
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: artifacts/*.zip
+          fail_on_unmatched_files: true

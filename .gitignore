@@ -1,0 +1,10 @@
+node_modules/
+dist/
+artifacts/
+.DS_Store
+
+# Local work notes and credentials
+docs/superpowers/
+.env
+.env.*
+*.pem

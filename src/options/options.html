@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Github++ — Options</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main class="wrap">
+    <h1>Github++</h1>
+    <p class="lead">A Docs tab for every GitHub repository.</p>
+
+    <section>
+      <h2>GitHub access token <span class="optional">optional</span></h2>
+      <p class="hint">
+        Without a token, GitHub allows 60 anonymous API requests/hour (roughly one repo listing per repo per
+        15&nbsp;minutes thanks to caching) and only public repositories. A
+        <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer">personal access token</a>
+        raises this to 5,000/hour and enables private repositories. A fine-grained token with read-only
+        <em>Contents</em> permission can read docs; the PR line-count split also needs <em>Pull requests: Read</em>.
+        The token is stored only in this browser's extension storage and sent
+        only to <code>api.github.com</code>.
+      </p>
+      <div class="row">
+        <input id="token" type="password" name="gdt-token" placeholder="ghp_… or github_pat_…" autocomplete="new-password" spellcheck="false" />
+        <button id="test-token" type="button">Test</button>
+        <button id="save-token" type="button" class="primary" hidden>Save token</button>
+      </div>
+      <p id="saved-token" class="hint"></p>
+      <p id="token-status" class="status" hidden></p>
+    </section>
+
+    <section>
+      <h2>Documentation folders</h2>
+      <p class="hint">
+        One folder per line, matched case-insensitively at any nesting depth (e.g. <code>docs</code> also matches
+        <code>packages/x/docs</code>). Multi-segment patterns like <code>website/docs</code> match consecutive path
+        segments. Root-level markdown files are controlled by the checkbox below.
+      </p>
+      <textarea id="folders" rows="10" spellcheck="false"></textarea>
+    </section>
+
+    <section>
+      <h2>Behavior</h2>
+      <label class="check"><input id="include-root" type="checkbox" /> Include root-level markdown files (README, CONTRIBUTING, …)</label>
+      <label class="check"><input id="show-badge" type="checkbox" /> Show document count badge on the Docs tab</label>
+      <label class="num-label">
+        Docs tab position
+        <select id="docs-tab-position">
+          <option value="last">Last (default)</option>
+          <option value="1">1 — First</option>
+          <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+          <option value="5">5</option><option value="6">6</option><option value="7">7</option>
+          <option value="8">8</option><option value="9">9</option><option value="10">10</option>
+          <option value="11">11</option><option value="12">12</option>
+        </select>
+      </label>
+      <p class="hint">Position in the repository tab row. If the row has fewer tabs, Docs appears last. Press Cmd+K (Ctrl+K on Windows/Linux) on a repository page to open Docs search.</p>
+      <label class="num-label">
+        Maximum documents to collect
+        <input id="max-files" type="number" min="10" max="5000" step="10" />
+      </label>
+      <label class="num-label">
+        Skip content indexing for files larger than (KB)
+        <input id="search-limit" type="number" min="10" max="2000" step="10" />
+      </label>
+    </section>
+
+    <div class="actions">
+      <button id="save" type="button" class="primary">Save</button>
+      <button id="reset" type="button">Restore defaults</button>
+      <span id="save-status" class="status" hidden></span>
+    </div>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

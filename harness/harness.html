@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-color-mode="light">
+<head>
+  <meta charset="utf-8" />
+  <title>acme/widget — harness</title>
+  <link rel="stylesheet" href="/dist/content.css" />
+  <style>
+    body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1f2328; }
+    .gh-header { padding: 12px 16px; border-bottom: 1px solid #d1d9e0; background: #f6f8fa; }
+    nav[aria-label='Repository'] ul { list-style: none; display: flex; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid #d1d9e0; }
+    nav[aria-label='Repository'] a { text-decoration: none; color: #1f2328; padding: 6px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
+    nav[aria-label='Repository'] a[aria-current] { font-weight: 600; box-shadow: inset 0 -2px 0 #fd8c73; }
+    nav[aria-label='Repository'] a:hover { background: #eff2f5; }
+    .Counter { background: #eff2f5; border-radius: 999px; padding: 1px 6px; font-size: 12px; }
+    main { padding: 0; }
+    .repo-home { padding: 24px 16px; }
+  </style>
+</head>
+<body>
+  <div class="gh-header"><strong>acme / widget</strong> — extension harness page</div>
+  <nav aria-label="Repository">
+    <ul class="UnderlineNav-body">
+      <li class="d-inline-flex"><a href="/acme/widget" aria-current="page" id="code-tab">Code</a></li>
+      <li class="d-inline-flex"><a href="/acme/widget/issues">Issues <span class="Counter">3</span></a></li>
+      <li class="d-inline-flex"><a href="/acme/widget/pulls">Pull requests</a></li>
+    </ul>
+  </nav>
+  <main>
+    <div class="repo-home">
+      <h2>Original GitHub content</h2>
+      <p id="original-marker">This block simulates GitHub's file browser / README and must be hidden while the Docs viewer is open.</p>
+    </div>
+  </main>
+  <script src="/harness/harness-data.js"></script>
+  <script src="/dist/content.js"></script>
+</body>
+</html>
